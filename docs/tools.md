@@ -1,6 +1,6 @@
 # 工具清单
 
-52 个 MCP 工具。返回统一信封：`{"ok": true, "data": {...}}` 或 `{"ok": false, "error": {"code": "...", "message": "..."}}`。
+54 个 MCP 工具。返回统一信封：`{"ok": true, "data": {...}}` 或 `{"ok": false, "error": {"code": "...", "message": "..."}}`。
 
 错误码：`CE_NOT_RUNNING` `NOT_ATTACHED` `ADDRESS_NOT_MAPPED` `NOT_FOUND` `VALIDATION_FAILED` `PERMISSION_DENIED` `STALE` `EXPECT_REQUIRED` `SCAN_GREW` `WRITES_DISABLED` `DEBUGGER_UNAVAILABLE` `DEBUGGER_NOT_ATTACHED` `HYPOTHESIS_REQUIRED` `CALIBRATION_REQUIRED` `PROTECTION_FAILED` `WRITE_FAILED` `UNKNOWN_COMMAND`
 
@@ -18,13 +18,16 @@
 | `attach_process` | `pid` | 附加进程（白名单强制，**副作用**） |
 | `process_info` | — | pid、名称、位宽、模块数、镜像基址 |
 
-## 读取（3）
+## 读取（4）
 
 | 工具 | 参数 | 说明 |
 |---|---|---|
 | `read_memory` | `addr`, `type=dword` | 读一个值。type: byte/word/dword/qword/float/double/pointer/utf8/utf16 |
+| `read_bytes` | `addr`, `count=256` | **一次读一整块**，返回十六进制串。count 上限 262144。按 `returned` 推进而不是 `requested`（跨页会提前停） |
 | `read_chain` | `base`, `offsets[]` | 多级指针链，返回每一跳 |
 | `module_of` | `addr` | 地址归属的模块 + 偏移 |
+
+`read_bytes` 是给「按结构形状找字段」用的：找遍 4 MB 堆里的每个 `(hp, maxhp)` 相邻 dword 对，逐地址调用是两百万次往返，任何超时都跑不完；分块读是 64 次调用，**0.9 秒**出结果。逐地址轮询不是慢，是会失败 —— 实测把游戏进程轮询到崩溃。
 
 ## 扫描（6）
 
@@ -37,7 +40,7 @@
 | `release_scan` | `scanId` | 释放结果集 |
 | `aob_scan` | `pattern`, `limit=50` | 特征码扫描，如 `"48 8B 05 ?? ?? ?? ??"` |
 
-## 分析（10）
+## 分析（11）
 
 | 工具 | 参数 | 说明 |
 |---|---|---|
@@ -49,6 +52,7 @@
 | `function_range` | `addr` | 估算函数边界 |
 | `find_pointer_chains` | `target`, `maxDepth=3`, `maxResults=20`, `maxOffset=4096` | 反向扫描找指向目标的模块级指针链 |
 | `dissect_structure` | `addr`, `maxFields=32` | 按 4 字节推断结构体布局 |
+| `find_struct` | `base`, `size`, `maxValues[]`, `hpMin`, `hpMax`, `hpLeMax=true`, `limit=200` | **按结构形状扫全窗口**：找所有 `(hp, maxhp)` 相邻 dword 对。CE 内部 64 KiB 分块，整窗一次管道调用 |
 | `xref_find` | `addr`, `module`, `refresh=false` | 经 CE 的 dissect-code 数据库找代码/数据引用 |
 | `ptr_trace_static` | `addr`, `max_depth=4` | 从数据地址沿 xref 反向走到模块代码 |
 

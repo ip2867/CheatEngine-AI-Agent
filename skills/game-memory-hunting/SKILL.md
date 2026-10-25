@@ -89,6 +89,36 @@ spending shots:
 On one hunt this took 372 candidates down to 40 in one pass, and all 40 were the
 same copy array.
 
+Better still, start from shape. If you suspect the field is a hit-point pair, say
+so and scan for it directly instead of narrowing values:
+
+```
+find_struct(base=<window>, size=<window>, maxValues=[100,200,300,500])
+```
+
+It returns every adjacent `(hp, maxhp)` dword pair with `hp <= max`. On a real
+4 MB window that is **6 candidates in 0.9 s with no shot fired**, versus ~159
+without the `hp <= max` constraint and thousands from any numeric sweep.
+
+Two lessons worth keeping:
+
+- **`hp <= max` is a logical constraint, not a numeric pattern.** Timers, frame
+  counters and per-object float parameters cannot satisfy it by accident, which
+  is exactly why it is the cheapest filter available.
+- **Prefer shape predicates over identity predicates.** Keying a sweep on a fixed
+  vtable value is tempting for "find every entity of type X", but polymorphic
+  objects need not share one. A vtable sweep found two of three entities and led
+  to the false conclusion that the third lived outside the window — it never did.
+
+Numeric narrowing remains correct when you do not yet know the shape. But the
+moment you do, switch: continuing to narrow numbers against timers is spending
+shots to fight the wrong population.
+
+Also: never enumerate a multi-megabyte window one address at a time. A per-offset
+`read_memory` walk is a million round trips — it exceeds any timeout and, measured,
+crashed the target process. Use `read_bytes` in 64 KiB chunks and advance by its
+`returned` field, not by `requested`, or every page boundary becomes a silent hole.
+
 ## 5. Writes into a copy are silently reverted — check who else writes it
 
 If writing an address gets overwritten within a frame, do not keep hunting for a

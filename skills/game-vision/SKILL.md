@@ -27,6 +27,24 @@ garbage:
 
     if GetForegroundWindow() != hwnd: abort, do not save a frame
 
+**Foreground is necessary but not sufficient.** `BitBlt` copies the *screen*, and
+being foreground only means the input queue points at us — an overlay, a
+notification, or a second app stacked above the game still lands in the PNG. One
+"capture the win screen" step silently saved an unrelated chat window this way,
+and nothing downstream noticed because the file was a perfectly valid PNG.
+
+Walk the z-order and refuse when anything else intersects the client rect:
+
+    r = GetClientRect; pt = (0,0); ClientToScreen(hwnd, pt)
+    for h in EnumWindows():
+        if h is us or not IsWindowVisible(h): continue
+        if GetWindowRect(h) intersects client rect: return ABORT + names
+
+Ignore windows of our own process (the game's own popups belong to the frame).
+On refusal, **delete the previous file** rather than leaving a stale one. A
+self-consistent wrong frame is worse than no frame, because every downstream step
+believes it.
+
 `AttachThreadInput` + `ShowWindow(SW_RESTORE)` + `BringWindowToTop` +
 `SetForegroundWindow` + `SetActiveWindow` is the sequence that wins the
 foreground. `SetForegroundWindow` alone loses to whatever holds focus.

@@ -1483,6 +1483,136 @@ local function bytesEqual(a, b)
   return true
 end
 
+-- Bulk read.  Everything else here talks one address at a time, which is fine
+-- for a setter or a single field but hopeless for "walk 8 MB of heap and find
+-- every (hp, maxhp) pair": that is 2 million round trips and the client cannot
+-- finish it inside any sane timeout.  One call returns a whole chunk, the caller
+-- parses it locally.  Chunked so a single reply never has to carry megabytes of
+-- JSON: `count` is capped, and callers loop over chunks.
+handlers.read_bytes = function(args)
+  local addr = parseAddr(args.addr)
+  if addr == nil then return fail('VALIDATION_FAILED', 'addr required') end
+
+  local count = tonumber(args.count or args.length) or 256
+  if count < 1 then return fail('VALIDATION_FAILED', 'count must be >= 1') end
+  -- 1 MiB of source becomes 3 MiB of hex once spaced, so cap well under that.
+  if count > 262144 then count = 262144 end
+
+  local readable, reason = checkReadable(addr)
+  if not readable then
+    return fail('ADDRESS_NOT_MAPPED', reason)
+  end
+
+  local tabs = readBytes(addr, count, true)
+  if tabs == nil then
+    return fail('READ_FAILED', string.format('readBytes returned nothing at %s (count %d)', hex(addr), count))
+  end
+
+  -- readBytes can stop early at a page boundary; report what actually came back
+  -- so the caller never assumes it received `count` bytes.
+  local parts = {}
+  for i = 1, #tabs do parts[i] = string.format('%02X', tabs[i]) end
+  return ok({
+    addr = hex(addr),
+    requested = count,
+    returned = #tabs,
+    hex = table.concat(parts),
+  })
+end
+
+-- Whole-window structural scan: find every place that LOOKS like a entity
+-- record, instead of asking for one address at a time.
+--
+-- Why this exists: the scan_* family narrows by VALUE, and value narrowing keeps
+-- what changes when the screen changes -- which includes timers, frame counters
+-- and a dozen floating parameters per object.  When the thing you want is a
+-- field of an object, the far cheaper filter is *shape*: an (hp, maxhp) pair
+-- where both are plausible, which is ~9 hits in 4 MB instead of millions.
+--
+-- Runs entirely inside CE, so the walk costs one pipe call rather than one per
+-- offset.  Chunk reads keep memory use flat regardless of window size.
+handlers.find_struct = function(args)
+  local base = parseAddr(args.base or args.addr)
+  if base == nil then return fail('VALIDATION_FAILED', 'base required') end
+  local size = tonumber(args.size) or 0x100000
+  if size < 8 then return fail('VALIDATION_FAILED', 'size must be >= 8') end
+  -- Upper bound so one call cannot wedge the pipe: 64 MiB of source.
+  if size > 0x4000000 then size = 0x4000000 end
+
+  -- The layout is fixed to (hp, maxhp) at offsets 0 and 4.  An earlier draft
+  -- took a caller-supplied layout, but it was only ever used for this one shape
+  -- and a configurable layout nobody varies is just a way to be wrong quietly.
+  local maxhpSet = {}
+  local anyMax = (args.maxValues == nil)
+  if not anyMax then
+    for _, v in ipairs(args.maxValues) do maxhpSet[tonumber(v)] = true end
+  end
+  local hpMin = tonumber(args.hpMin) or 1
+  local hpMax = tonumber(args.hpMax) or 0x7FFFFFFF
+  -- hp <= max is the one constraint no timer or float parameter can satisfy by
+  -- accident: a countdown that happens to sit next to a plausible maximum will
+  -- usually exceed it.  On a real window this cut 159 candidates to 16 with the
+  -- genuinely shaped records still all present, so it defaults to on.
+  local requireHpLeMax = (args.hpLeMax ~= false)
+  local limit = tonumber(args.limit) or 200
+
+  local CHUNK = 65536
+  local results = {}
+  local unmapped = 0
+  local off = 0
+
+  while off < size and #results < limit do
+    local addr = base + off
+    local want = math.min(CHUNK, size - off)
+    local readable = checkReadable(addr)
+    if not readable then
+      unmapped = unmapped + 1
+      off = off + CHUNK        -- unmapped page: skip the whole chunk
+    else
+      local tabs = readBytes(addr, want, true)
+      if tabs == nil then
+        unmapped = unmapped + 1
+        off = off + CHUNK
+      else
+        local got = #tabs
+        if got < 8 then
+          off = off + math.max(got, 4)
+        else
+          local n = math.floor(got / 4)
+          -- 4 bytes of overlap keeps a pair that straddles the boundary.
+          local step = math.max(got - 4, 4)
+          local slab = {}
+          for i = 1, n do
+            local b = (i - 1) * 4
+            slab[i] = tabs[b + 1] + tabs[b + 2] * 256 + tabs[b + 3] * 65536 + tabs[b + 4] * 16777216
+          end
+          -- a pair needs two dwords, so stop at n-1
+          for i = 1, n - 1 do
+            local hp = slab[i]
+            local mx = slab[i + 1]
+            local okPair = anyMax and (mx > 0 and mx <= 100000000) or (maxhpSet[mx] == true)
+            if okPair and requireHpLeMax and hp > mx then okPair = false end
+            if okPair and hp >= hpMin and hp <= hpMax then
+              results[#results + 1] = { addr = hex(addr + (i - 1) * 4), hp = hp, max = mx }
+              if #results >= limit then break end
+            end
+          end
+          off = off + step
+        end
+      end
+    end
+  end
+
+  return ok({
+    base = hex(base),
+    scanned = math.min(off, size),
+    found = #results,
+    truncated = (#results >= limit),
+    unmappedChunks = unmapped,
+    items = results,
+  })
+end
+
 handlers.write = function(args)
   local addr = parseAddr(args.addr)
   if addr == nil then return fail('VALIDATION_FAILED', 'addr required') end

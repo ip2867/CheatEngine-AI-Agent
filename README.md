@@ -2,11 +2,10 @@
 
 让 AI agent 直接驱动 Cheat Engine 做内存分析。装好后，任何支持 MCP 的 AI 客户端（Claude Desktop、Cursor、ZCode 等）都能读取内存、扫描数值、找指针链、下断点、读寄存器、改代码。
 
-**52 个工具**，覆盖从"扫一个数值"到"注入代码区分敌我"的完整链路。
+**54 个工具**，覆盖从"扫一个数值"到"注入代码区分敌我"的完整链路。
 额外带 **15 个技能**：2 个是这一轮实战里被打出来的，13 个 vendored 自
 [awesome-game-security](https://github.com/gmh5225/awesome-game-security)。
 
-这个工具详细介绍与解题实战观看blog：https://ip2867.github.io/
 ## 先说清楚它不是什么
 
 这份文档里有两类话，请分开读：
@@ -26,10 +25,10 @@ CheatEngine-AI-Agent/
 ├─ install.ps1              ← 一键安装（无需管理员）
 ├─ ce/ce_ai_bridge.lua      ← CE 内执行层，由 autorun 自动加载
 │  ce/v2_*.lua              ← 策略 / 断点 / 指令 / 因果四个模块
-├─ mcp/ce_mcp_server.py     ← MCP 服务端，52 个工具
+├─ mcp/ce_mcp_server.py     ← MCP 服务端，54 个工具
 ├─ config/                  ← 安装时生成的 MCP 配置（不入库）
 ├─ docs/
-│  ├─ tools.md              ← 52 个工具的完整参数与错误码
+│  ├─ tools.md              ← 54 个工具的完整参数与错误码
 │  ├─ walkthrough.md        ← 实战记录：换弹死局、注入、以及所有失败
 │  └─ skills.md             ← 15 个技能的索引与来历
 └─ skills/
@@ -161,8 +160,8 @@ dofile([[完整路径\ce\ce_ai_bridge.lua]])
 
 ## 工具清单
 
-**52 个工具**，分九组：进程(4)、读取(3)、扫描(6)、分析(10)、写入(6)、
-断点(10)、假设与标定(6)、候选集与因果(6)、审计(1)。完整参数与返回值见
+**54 个工具**，分十组：进程(4)、读取(4)、扫描(6)、分析(11)、写入(6)、
+断点(10)、假设与标定(6)、候选集(5)、因果探针(1)、审计(1)。完整参数与返回值见
 `docs/tools.md`。
 
 两组值得单独说：

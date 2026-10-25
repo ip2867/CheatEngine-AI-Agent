@@ -311,6 +311,24 @@ def read_memory(addr: str, type: str = "dword") -> dict:
 
 
 @mcp.tool
+def read_bytes(addr: str, count: int = 256) -> dict:
+    """Read a block of raw bytes in ONE call and get back a hex string.
+
+    Use this instead of looping read_memory over consecutive addresses. A
+    heap-wide search for a field shape (for example every (hp, maxhp) pair)
+    touches millions of offsets; one round trip per offset cannot finish, and
+    timing out mid-scan is how a "find all entities" step turns into an
+    afternoon. Loop over chunks of this instead: 64 KiB per call is a good size.
+
+    count is capped at 262144. The reply's `returned` field may be less than
+    `requested` because the read stops at a page boundary -- always advance by
+    `returned`, never by `requested`, or a skipped page silently becomes a hole
+    in your data.
+    """
+    return _call("read_bytes", audit_as="read_bytes", addr=addr, count=count)
+
+
+@mcp.tool
 def read_chain(base: str, offsets: list[int]) -> dict:
     """Follow a multi-level pointer chain and return every hop.
 
@@ -462,6 +480,36 @@ def dissect_structure(addr: str, maxFields: int = 32) -> dict:
     orientation, not a substitute for analysis.
     """
     return _call("struct_dissect", addr=addr, maxFields=maxFields)
+
+
+@mcp.tool
+def find_struct(base: str, size: str = "0x100000", maxValues: list[int] | None = None,
+                hpMin: int = 1, hpMax: int = 2147483647, limit: int = 200) -> dict:
+    """Scan a memory window for every object that LOOKS like an (hp, maxhp) record.
+
+    This is the structural filter, and it is usually the fastest way to enumerate
+    live entities. Value scans narrow by "changed this way", which keeps timers,
+    frame counters and every float parameter that happens to move with the
+    screen; shape narrowing keeps only adjacent dword pairs where both numbers
+    are plausible hit points. In a real 4 MB heap window that is ~9 candidates,
+    found in about a second, instead of millions of scan hits.
+
+    `base` and `size` take a hex string or a number. The whole walk happens
+    inside Cheat Engine in 64 KiB chunks, so it is ONE pipe call -- looping
+    read_memory over the same window is millions of round trips and will not
+    finish (and hammering a live process that way can kill it).
+
+    maxValues restricts which "max hp" numbers are accepted (for example
+    [100, 200, 300]); omit it to accept any plausible maximum. Pass the window
+    from memory_regions(writable=True) rather than guessing an address range.
+
+    Returns items[{addr, hp, max}], plus `scanned`, `unmappedChunks` and
+    `truncated`. A found record is a candidate, not proof: confirm by watching it
+    follow the on-screen bar, and remember the first field of a pair is often a
+    per-frame copy that the game rewrites.
+    """
+    return _call("find_struct", audit_as="find_struct", base=base, size=size,
+                 maxValues=maxValues, hpMin=hpMin, hpMax=hpMax, limit=limit)
 
 
 # ---- writing (gated)
