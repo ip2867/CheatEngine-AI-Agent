@@ -6,6 +6,8 @@
 额外带 **15 个技能**：2 个是这一轮实战里被打出来的，13 个 vendored 自
 [awesome-game-security](https://github.com/gmh5225/awesome-game-security)。
 
+实战部分可以看：https://ip2867.github.io
+
 ## 先说清楚它不是什么
 
 这份文档里有两类话，请分开读：
